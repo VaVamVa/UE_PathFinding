@@ -130,8 +130,10 @@ bool AZoneManager::RegisterZone(const FZoneLevelData& inZoneData)
 		return false;
 	}
 
-	// Zone 컴포넌트 생성
-	UZoneLevelInstanceComponent* zoneComponent = CreateDefaultSubobject<UZoneLevelInstanceComponent>(
+	// Zone 컴포넌트 생성 (Runtime에서 안전한 NewObject 사용)
+	UZoneLevelInstanceComponent* zoneComponent = NewObject<UZoneLevelInstanceComponent>(
+		this,
+		UZoneLevelInstanceComponent::StaticClass(),
 		*FString::Printf(TEXT("Zone_%s_%d"), *inZoneData.zoneIdentifier.zoneName.ToString(), inZoneData.zoneIdentifier.zoneID)
 	);
 

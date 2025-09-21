@@ -80,7 +80,8 @@ PathFinding/
 
 ## 코드 작성 순서 (Coding Protocol)
 
-1. 알고리즘 구현, 클래스 설계에는 `/model opus` 사용, 간단한 명령|이름 변경|단순 문장 변경 명령에는 `/model sonnet` 사용
+1. 알고리즘 구현, 클래스 설계, 검증 및 코드 리뷰에는 `/model opus` 사용, 그 외의 대부분의 명령에는 `/model sonnet` 사용
+    - `Log`, `Git` 작업에 대해서는 `sonnet` 사용
 2. [Convention](./CLAUDE-Convention.md) 파일을 참고하여 코드 작성 준비
 3. Default 작업 방식은 "Plan Mode"로, 작업 순서를 명시하고, 해당 순서대로 이행
 4. 작업 완료 후 작업한 코드 및 해당 코드를 이용하는 Data의 검증 실행

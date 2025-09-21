@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 #include "Components/ActorComponent.h"
+#include "HAL/CriticalSection.h"
 #include "Zone/ZoneTypes.h"
 #include "Zone/ZoneLevelData.h"
 #include "ZonePathScoreCache.generated.h"
@@ -124,9 +125,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Path Grid")
 	FVector gridOrigin;
 
-	/** @Brief Flattened array of all path nodes */
+	/** @Brief Sparse map of path nodes (only stores non-default nodes for memory efficiency) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Path Grid")
-	TArray<FPathNode> pathNodes;
+	TMap<FIntVector, FPathNode> pathNodes;
 
 	/** @Brief Whether grid has been successfully generated */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Path Grid")
@@ -354,6 +355,9 @@ protected:
 
 	/** @Brief Timer handle for auto-save functionality */
 	FTimerHandle autoSaveTimerHandle;
+
+	/** @Brief Thread safety mutex for PathGrid operations */
+	mutable FCriticalSection pathGridMutex;
 
 	/**
 	* @Brief Performs collision checking for pathfinding grid

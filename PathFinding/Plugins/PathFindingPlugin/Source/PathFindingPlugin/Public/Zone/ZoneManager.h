@@ -281,10 +281,14 @@ protected:
 	FTimerHandle cacheSaveTimerHandle;
 
 	/** @Brief Loading queue management */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Zone Loading")
 	TArray<FZoneIdentifier> loadingQueue;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Zone Loading")
 	TArray<FZoneIdentifier> currentlyLoading;
 
 	/** @Brief Manager initialization state */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Zone Manager")
 	bool bIsInitialized;
 
 	/**

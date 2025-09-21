@@ -42,6 +42,8 @@ void UZonePathScoreCache::InitializeZoneCache(const FZoneLevelData& inZoneData)
 
 void UZonePathScoreCache::GeneratePathGrid(const FZoneLevelData& inZoneData)
 {
+	FScopeLock Lock(&pathGridMutex);
+
 	if (!inZoneData.IsValid())
 	{
 		return;
@@ -59,46 +61,68 @@ void UZonePathScoreCache::GeneratePathGrid(const FZoneLevelData& inZoneData)
 
 void UZonePathScoreCache::UpdatePathNode(const FIntVector& inGridPosition, float inNewCost, bool bBlocked)
 {
-	FPathNode node;
-	if (pathGrid.GetNodeMutable(inGridPosition, node))
+	FScopeLock Lock(&pathGridMutex);
+
+	if (!pathGrid.IsValidGridPosition(inGridPosition))
 	{
-		node.movementCost = inNewCost;
-		node.bIsBlocked = bBlocked;
-
-		// 변경된 노드를 다시 배열에 저장
-		int32 index = pathGrid.GetNodeIndex(inGridPosition);
-		if (index != INDEX_NONE && pathGrid.pathNodes.IsValidIndex(index))
-		{
-			pathGrid.pathNodes[index] = node;
-		}
-
-		pathGrid.lastUpdateTime = FDateTime::Now();
+		return;
 	}
+
+	// 스파스 구조에서 노드 찾거나 생성
+	FPathNode* nodePtr = pathGrid.pathNodes.Find(inGridPosition);
+	if (!nodePtr)
+	{
+		// 새 노드 생성
+		FVector worldPos = pathGrid.GridToWorld(inGridPosition);
+		FPathNode newNode(worldPos, inGridPosition);
+		nodePtr = &pathGrid.pathNodes.Add(inGridPosition, newNode);
+	}
+
+	nodePtr->movementCost = inNewCost;
+	nodePtr->bIsBlocked = bBlocked;
+	pathGrid.lastUpdateTime = FDateTime::Now();
 }
 
 bool UZonePathScoreCache::GetPathNode(const FIntVector& inGridPosition, FPathNode& outPathNode) const
 {
+	FScopeLock Lock(&pathGridMutex);
 	return pathGrid.GetNode(inGridPosition, outPathNode);
 }
 
 bool UZonePathScoreCache::IsNodeBlocked(const FIntVector& inGridPosition) const
 {
-	FPathNode node;
-	if (GetPathNode(inGridPosition, node))
+	FScopeLock Lock(&pathGridMutex);
+
+	if (!pathGrid.IsValidGridPosition(inGridPosition))
 	{
-		return node.bIsBlocked;
+		return true;
 	}
-	return true;
+
+	if (const FPathNode* nodePtr = pathGrid.pathNodes.Find(inGridPosition))
+	{
+		return nodePtr->bIsBlocked;
+	}
+
+	// 스파스 그리드에서 저장되지 않은 기본 노드는 차단되지 않음
+	return false;
 }
 
 float UZonePathScoreCache::GetMovementCost(const FIntVector& inGridPosition) const
 {
-	FPathNode node;
-	if (GetPathNode(inGridPosition, node))
+	FScopeLock Lock(&pathGridMutex);
+
+	if (!pathGrid.IsValidGridPosition(inGridPosition))
 	{
-		return node.movementCost;
+		return FLT_MAX;
 	}
-	return FLT_MAX;
+
+	if (const FPathNode* nodePtr = pathGrid.pathNodes.Find(inGridPosition))
+	{
+		return nodePtr->movementCost;
+	}
+
+	// 스파스 그리드에서 저장되지 않은 기본 노드의 기본 비용
+	return 1.0f;
 }
 
 TArray<FIntVector> UZonePathScoreCache::GetNeighborNodes(const FIntVector& inGridPosition, bool bIncludeDiagonals) const
@@ -171,81 +195,106 @@ void UZonePathScoreCache::PerformCollisionCheck(const FZoneLevelData& inZoneData
 	queryParams.bReturnPhysicalMaterial = false;
 
 	int32 blockedNodes = 0;
-	const float halfCellSize = pathGrid.cellSize * 0.5f;
+	int32 totalCheckedNodes = 0;
 
-	for (int32 i = 0; i < pathGrid.pathNodes.Num(); ++i)
+	// 스파스 그리드: 샘플링을 통해 필요한 노드만 검사하여 메모리 절약
+	const int32 sampleStep = FMath::Max(1, pathGrid.gridDimensions.X / 50); // 적응적 샘플링
+
+	for (int32 z = 0; z < pathGrid.gridDimensions.Z; z += sampleStep)
 	{
-		FPathNode& node = pathGrid.pathNodes[i];
-
-		// 지면 체크를 위한 라인 트레이스
-		FVector traceStart = node.worldPosition + FVector(0, 0, 500.0f);
-		FVector traceEnd = node.worldPosition - FVector(0, 0, 500.0f);
-
-		FHitResult hitResult;
-		bool bHit = GetWorld()->LineTraceSingleByChannel(
-			hitResult,
-			traceStart,
-			traceEnd,
-			ECC_WorldStatic,
-			queryParams
-		);
-
-		if (bHit)
+		for (int32 y = 0; y < pathGrid.gridDimensions.Y; y += sampleStep)
 		{
-			node.worldPosition.Z = hitResult.Location.Z;
-
-			// 블록된 액터 태그 체크
-			if (hitResult.GetActor())
+			for (int32 x = 0; x < pathGrid.gridDimensions.X; x += sampleStep)
 			{
-				for (const FName& blockedTag : inZoneData.pathSettings.blockedActorTags)
+				FIntVector gridPos(x, y, z);
+				FVector worldPos = pathGrid.GridToWorld(gridPos);
+				totalCheckedNodes++;
+
+				// 지면 체크를 위한 라인 트레이스
+				FVector traceStart = worldPos + FVector(0, 0, 500.0f);
+				FVector traceEnd = worldPos - FVector(0, 0, 500.0f);
+
+				FHitResult hitResult;
+				bool bHit = GetWorld()->LineTraceSingleByChannel(
+					hitResult,
+					traceStart,
+					traceEnd,
+					ECC_WorldStatic,
+					queryParams
+				);
+
+				// 충돌 또는 특별한 상황이 있는 경우에만 노드를 스파스 맵에 저장
+				bool bShouldStoreNode = false;
+				FPathNode newNode(worldPos, gridPos);
+
+				if (bHit)
 				{
-					if (hitResult.GetActor()->ActorHasTag(blockedTag))
+					newNode.worldPosition.Z = hitResult.Location.Z;
+
+					// 블록된 액터 태그 체크
+					if (hitResult.GetActor())
 					{
-						node.bIsBlocked = true;
+						for (const FName& blockedTag : inZoneData.pathSettings.blockedActorTags)
+						{
+							if (hitResult.GetActor()->ActorHasTag(blockedTag))
+							{
+								newNode.bIsBlocked = true;
+								blockedNodes++;
+								bShouldStoreNode = true;
+								break;
+							}
+						}
+					}
+
+					// 경사도 체크
+					FVector surfaceNormal = hitResult.Normal;
+					float slopeAngle = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(surfaceNormal, FVector::UpVector)));
+
+					if (slopeAngle > 45.0f)
+					{
+						newNode.movementCost *= 2.0f;
+						bShouldStoreNode = true;
+					}
+					if (slopeAngle > 60.0f)
+					{
+						newNode.bIsBlocked = true;
 						blockedNodes++;
-						break;
+						bShouldStoreNode = true;
 					}
 				}
-			}
+				else
+				{
+					// 지면이 없는 경우
+					if (inZoneData.pathSettings.pathType != EZonePathType::Air &&
+						inZoneData.pathSettings.pathType != EZonePathType::Mixed)
+					{
+						newNode.bIsBlocked = true;
+						blockedNodes++;
+						bShouldStoreNode = true;
+					}
+				}
 
-			// 경사도 체크 (너무 가파른 경사는 이동 불가)
-			FVector surfaceNormal = hitResult.Normal;
-			float slopeAngle = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(surfaceNormal, FVector::UpVector)));
+				// Zone 경계 체크
+				if (!inZoneData.zoneBounds.ContainsPoint(newNode.worldPosition))
+				{
+					newNode.bIsBlocked = true;
+					blockedNodes++;
+					bShouldStoreNode = true;
+				}
 
-			if (slopeAngle > 45.0f) // 45도 이상 경사/*modify_250921_: 경사 임계값 설정*/
-			{
-				node.movementCost *= 2.0f; // 이동 비용 증가
-			}
-			if (slopeAngle > 60.0f) // 60도 이상은 차단/*modify_250921_: 차단 경사 임계값 설정*/
-			{
-				node.bIsBlocked = true;
-				blockedNodes++;
+				// 기본값이 아닌 경우에만 스파스 맵에 저장
+				if (bShouldStoreNode || newNode.movementCost != 1.0f)
+				{
+					newNode.movementCost *= inZoneData.pathSettings.movementCostMultiplier;
+					pathGrid.pathNodes.Add(gridPos, newNode);
+				}
 			}
 		}
-		else
-		{
-			// 지면이 없는 경우 공중 노드로 처리
-			if (inZoneData.pathSettings.pathType != EZonePathType::Air &&
-				inZoneData.pathSettings.pathType != EZonePathType::Mixed)
-			{
-				node.bIsBlocked = true;
-				blockedNodes++;
-			}
-		}
-
-		// Zone 경계 체크
-		if (!inZoneData.zoneBounds.ContainsPoint(node.worldPosition))
-		{
-			node.bIsBlocked = true;
-			blockedNodes++;
-		}
-
-		// 이동 비용에 Zone 설정 반영
-		node.movementCost *= inZoneData.pathSettings.movementCostMultiplier;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("Collision check completed: %d blocked nodes out of %d total nodes"),
-		blockedNodes, pathGrid.pathNodes.Num());
+	UE_LOG(LogTemp, Log, TEXT("Sparse collision check completed: %d blocked nodes, %d stored nodes out of %d checked (%d total possible)"),
+		blockedNodes, pathGrid.pathNodes.Num(), totalCheckedNodes,
+		pathGrid.gridDimensions.X * pathGrid.gridDimensions.Y * pathGrid.gridDimensions.Z);
 }
 
 void UZonePathScoreCache::SetupConnectionPoints(const FZoneLevelData& inZoneData)
@@ -258,24 +307,23 @@ void UZonePathScoreCache::SetupConnectionPoints(const FZoneLevelData& inZoneData
 		}
 
 		FIntVector gridPos = pathGrid.WorldToGrid(connectionPoint.connectionLocation);
-		FPathNode node;
 
-		if (pathGrid.GetNodeMutable(gridPos, node))
+		// 스파스 구조에서 연결점 노드 생성 또는 업데이트
+		FPathNode* nodePtr = pathGrid.pathNodes.Find(gridPos);
+		if (!nodePtr)
 		{
-			node.bIsConnectionPoint = true;
-			node.connectedZone = connectionPoint.targetZone;
-			node.movementCost = connectionPoint.transitionCost;
-
-			// 변경된 노드를 다시 배열에 저장
-			int32 index = pathGrid.GetNodeIndex(gridPos);
-			if (index != INDEX_NONE && pathGrid.pathNodes.IsValidIndex(index))
-			{
-				pathGrid.pathNodes[index] = node;
-			}
-
-			UE_LOG(LogTemp, Log, TEXT("Connection point set up at %s connecting to %s"),
-				*gridPos.ToString(), *connectionPoint.targetZone.ToString());
+			// 새 연결점 노드 생성
+			FVector worldPos = pathGrid.GridToWorld(gridPos);
+			FPathNode newNode(worldPos, gridPos);
+			nodePtr = &pathGrid.pathNodes.Add(gridPos, newNode);
 		}
+
+		nodePtr->bIsConnectionPoint = true;
+		nodePtr->connectedZone = connectionPoint.targetZone;
+		nodePtr->movementCost = connectionPoint.transitionCost;
+
+		UE_LOG(LogTemp, Log, TEXT("Connection point set up at %s connecting to %s"),
+			*gridPos.ToString(), *connectionPoint.targetZone.ToString());
 	}
 }
 
@@ -331,24 +379,41 @@ FVector FZonePathGrid::GridToWorld(const FIntVector& inGridPos) const
 
 bool FZonePathGrid::GetNode(const FIntVector& inGridPos, FPathNode& outNode) const
 {
-	int32 index = GetNodeIndex(inGridPos);
-	if (index != INDEX_NONE && pathNodes.IsValidIndex(index))
+	if (!IsValidGridPosition(inGridPos))
 	{
-		outNode = pathNodes[index];
+		return false;
+	}
+
+	if (const FPathNode* nodePtr = pathNodes.Find(inGridPos))
+	{
+		outNode = *nodePtr;
 		return true;
 	}
-	return false;
+
+	// 기본 노드 반환 (스파스 그리드에서 저장되지 않은 기본값)
+	FVector worldPos = GridToWorld(inGridPos);
+	outNode = FPathNode(worldPos, inGridPos);
+	return true;
 }
 
 bool FZonePathGrid::GetNodeMutable(const FIntVector& inGridPos, FPathNode& outNode)
 {
-	int32 index = GetNodeIndex(inGridPos);
-	if (index != INDEX_NONE && pathNodes.IsValidIndex(index))
+	if (!IsValidGridPosition(inGridPos))
 	{
-		outNode = pathNodes[index];
+		return false;
+	}
+
+	if (FPathNode* nodePtr = pathNodes.Find(inGridPos))
+	{
+		outNode = *nodePtr;
 		return true;
 	}
-	return false;
+
+	// 기본 노드 생성 및 반환
+	FVector worldPos = GridToWorld(inGridPos);
+	outNode = FPathNode(worldPos, inGridPos);
+	pathNodes.Add(inGridPos, outNode);
+	return true;
 }
 
 void FZonePathGrid::InitializeGrid(const FZoneBounds& inZoneBounds, float inCellSize)
@@ -363,31 +428,15 @@ void FZonePathGrid::InitializeGrid(const FZoneBounds& inZoneBounds, float inCell
 		FMath::CeilToInt(inZoneBounds.height / cellSize)
 	);
 
-	int32 totalNodes = gridDimensions.X * gridDimensions.Y * gridDimensions.Z;
-	pathNodes.Reset(totalNodes);
-	pathNodes.SetNum(totalNodes);
-
-	// 노드 초기화
-	for (int32 z = 0; z < gridDimensions.Z; ++z)
-	{
-		for (int32 y = 0; y < gridDimensions.Y; ++y)
-		{
-			for (int32 x = 0; x < gridDimensions.X; ++x)
-			{
-				FIntVector gridPos(x, y, z);
-				FVector worldPos = GridToWorld(gridPos);
-				int32 index = GetNodeIndex(gridPos);
-
-				if (pathNodes.IsValidIndex(index))
-				{
-					pathNodes[index] = FPathNode(worldPos, gridPos);
-				}
-			}
-		}
-	}
+	// 스파스 그리드 초기화 - 기본 노드들은 필요할 때만 생성
+	pathNodes.Empty();
+	pathNodes.Reserve(FMath::Min(1000, gridDimensions.X * gridDimensions.Y)); // 예상 활성 노드 수
 
 	bIsGenerated = true;
 	lastUpdateTime = FDateTime::Now();
+
+	UE_LOG(LogTemp, Log, TEXT("Sparse grid initialized with capacity for %d nodes (potential %d total)"),
+		pathNodes.GetAllocatedSize(), gridDimensions.X * gridDimensions.Y * gridDimensions.Z);
 }
 
 bool FZonePathGrid::IsValidGridPosition(const FIntVector& inGridPos) const
