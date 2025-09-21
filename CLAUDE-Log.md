@@ -43,7 +43,9 @@
 2. 만약 Local Diff 존재 시 Commit
     - Commit Message 작성 규칙은 [Git](./CLAUDE-Git.md)을 따름
 
-3. 예시
+3. 요약 완료 후 `compact` 되지 않았다면, `compact` 진행
+
+4. 예시
     ```
     ## Compact Log N (N은 1부터 증가하는 수. Start 이후로 Compact 한 만큼.)
     - YYYYMMDD hh:mm 
@@ -73,7 +75,11 @@
 2. 만약 Local Unstaged 변경 사항 존재 시 Commit
     - Commit Message 작성 규칙은 [Git](./CLAUDE-Git.md)을 따름
 
-3. 예시
+3. 요약 완료 후 `compact` 되지 않았다면, `compact` 진행
+
+4. 모두 완료 후 Session 종료
+
+5. 예시
     ```
     ## End Log
     - YYYYMMDD hh:mm
