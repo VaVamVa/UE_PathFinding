@@ -19,7 +19,8 @@
     ```
     - [API_Tip](https://dev.epicgames.com/documentation/ko-kr/unreal-engine/exposing-cplusplus-to-blueprints-visual-scripting-in-unreal-engine)
     - 주석의 column 정렬은 제일 긴 줄을 기준으로 2칸 띄우기
-4. 만약 코드를 수정하거나 리팩토링 해야 한다면, `/*modify_YYMMDD_: ~~의 이유로 수정*/` 으로 간략하게 설명을 붙여서 수정.
+5. 함수에서 Value Type 반환으로 성공 여부를 판단해야 한다면, `boolean`을 return하고 참조 변수 Parameter로 전달하게 Argument 구성
+6. 만약 코드를 수정하거나 리팩토링 해야 한다면, `/*modify_YYMMDD_: ~~의 이유로 수정*/` 으로 간략하게 설명을 붙여서 수정.
     - 새로 추가되는 설명이 가장 아래에 오게 기입.
     - `YYMMDD`는 현재 시스템 날짜 ( UTC+09:00 ).
 

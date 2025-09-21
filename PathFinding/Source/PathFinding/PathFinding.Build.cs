@@ -13,7 +13,8 @@ public class PathFinding : ModuleRules
 			"Core", "CoreUObject", "Engine",
 			"InputCore", "Json", "JsonUtilities",
 			"AIModule",
-			"UMG"
+			"UMG",
+			"PathFindingPlugin"/*250921*/
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });

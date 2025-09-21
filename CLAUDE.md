@@ -80,10 +80,11 @@ PathFinding/
 
 ## 코드 작성 순서 (Coding Protocol)
 
-1. [Convention](./CLAUDE-Convention.md) 파일을 참고하여 코드 작성 준비
-2. Default 작업 방식은 "Plan Mode"로, 작업 순서를 명시하고, 해당 순서대로 이행
-3. 작업 완료 후 작업한 코드 및 해당 코드를 이용하는 Data의 검증 실행
-4. 검증 후 수정해야 할 부분 있으면 `1`부터 반복
+1. 알고리즘 구현, 클래스 설계에는 `/model opus` 사용, 간단한 명령|이름 변경|단순 문장 변경 명령에는 `/model sonnet` 사용
+2. [Convention](./CLAUDE-Convention.md) 파일을 참고하여 코드 작성 준비
+3. Default 작업 방식은 "Plan Mode"로, 작업 순서를 명시하고, 해당 순서대로 이행
+4. 작업 완료 후 작업한 코드 및 해당 코드를 이용하는 Data의 검증 실행
+5. 검증 후 수정해야 할 부분 있으면 `1`부터 반복
 
 ## 빌드 및 실행
 
